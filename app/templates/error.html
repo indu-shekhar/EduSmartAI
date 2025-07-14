@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Error - EduSmartAI{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="alert alert-danger" role="alert">
+                <h4 class="alert-heading">Application Error</h4>
+                <p>{{ error_message or "An unexpected error occurred." }}</p>
+                <hr>
+                <p class="mb-0">
+                    Please check the application logs or contact the administrator if this problem persists.
+                </p>
+            </div>
+            
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Troubleshooting Steps</h5>
+                    <ol>
+                        <li>Check that your <code>.env</code> file is properly configured</li>
+                        <li>Ensure <code>GEMINI_API_KEY</code> is set</li>
+                        <li>Verify all required directories exist</li>
+                        <li>Check the application logs for detailed error messages</li>
+                    </ol>
+                    
+                    <a href="/" class="btn btn-primary">Try Again</a>
+                    <a href="/health" class="btn btn-secondary">Check Health</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard - EduSmartAI{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="row">
+        <div class="col-12">
+            <h2 class="mb-4">
+                <i class="bi bi-gear-fill me-2"></i>
+                Admin Dashboard
+            </h2>
+        </div>
+    </div>
+
+    <!-- Status Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h6 class="card-title">System Status</h6>
+                            <h4 id="systemStatus">Loading...</h4>
+                        </div>
+                        <i class="bi bi-heart-pulse-fill display-6"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-3">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h6 class="card-title">Total Messages</h6>
+                            <h4 id="totalMessages">0</h4>
+                        </div>
+                        <i class="bi bi-chat-dots-fill display-6"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-3">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h6 class="card-title">Uploaded Files</h6>
+                            <h4 id="totalFiles">0</h4>
+                        </div>
+                        <i class="bi bi-file-earmark-text-fill display-6"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-3">
+            <div class="card bg-warning text-dark">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h6 class="card-title">Vector Index</h6>
+                            <h4 id="indexStatus">Checking...</h4>
+                        </div>
+                        <i class="bi bi-database-fill display-6"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Actions Section -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">System Actions</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <h6>Index Management</h6>
+                            <div class="btn-group w-100" role="group">
+                                <button class="btn btn-primary" id="refreshIndexBtn">
+                                    <i class="bi bi-arrow-clockwise me-1"></i>Refresh Index
+                                </button>
+                                <button class="btn btn-warning" id="rebuildIndexBtn">
+                                    <i class="bi bi-arrow-repeat me-1"></i>Rebuild Index
+                                </button>
+                                <button class="btn btn-success" id="reIngestBtn">
+                                    <i class="bi bi-upload me-1"></i>Re-ingest Files
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <h6>Maintenance</h6>
+                            <div class="btn-group w-100" role="group">
+                                <button class="btn btn-secondary" id="cleanupBtn">
+                                    <i class="bi bi-trash me-1"></i>Cleanup Old Data
+                                </button>
+                                <button class="btn btn-info" id="exportLogsBtn">
+                                    <i class="bi bi-download me-1"></i>Export Logs
+                                </button>
+                                <button class="btn btn-dark" id="viewConfigBtn">
+                                    <i class="bi bi-gear me-1"></i>View Config
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Metrics Section -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Recent Processing Activity</h5>
+                </div>
+                <div class="card-body">
+                    <div id="processingActivity">
+                        Loading...
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Active Sessions</h5>
+                </div>
+                <div class="card-body">
+                    <div id="activeSessions">
+                        Loading...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Logs -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">System Logs</h5>
+                    <button class="btn btn-outline-secondary btn-sm" id="refreshLogsBtn">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-sm" id="logsTable">
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Operation</th>
+                                    <th>Status</th>
+                                    <th>Files Processed</th>
+                                    <th>Duration</th>
+                                </tr>
+                            </thead>
+                            <tbody id="logsTableBody">
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted">Loading logs...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Processing Modal -->
+<div class="modal fade" id="processingModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Processing...</h5>
+            </div>
+            <div class="modal-body text-center">
+                <div class="spinner-border text-primary mb-3" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p id="processingMessage">Please wait while the operation completes...</p>
+                <div class="progress">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                         role="progressbar" style="width: 100%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Config Modal -->
+<div class="modal fade" id="configModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">System Configuration</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <pre id="configContent">Loading configuration...</pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+{% endblock %}
