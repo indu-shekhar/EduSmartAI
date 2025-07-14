@@ -67,6 +67,10 @@ class LlamaIndexService:
         # Initialize components
         self._setup_llm_and_embedding()
         self._setup_vector_store()
+        
+        # Initialize storage context
+        self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
+        
         self.index = None
         
         # Load existing index if available
@@ -137,6 +141,9 @@ class LlamaIndexService:
                     )
                 )
                 
+                # Store client as instance variable for later use
+                self.chroma_client = chroma_client
+                
                 # Use a consistent collection name for persistence
                 collection_name = "edusmartai_main"
                 
@@ -151,6 +158,8 @@ class LlamaIndexService:
                     )
                     logger.info(f"Created new ChromaDB collection: {collection_name}")
                 
+                # Store collection as instance variable for later use
+                self.chroma_collection = chroma_collection
                 self.vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
                 logger.info(f"ChromaDB vector store initialized at {self.vector_dir}")
                 
@@ -177,6 +186,55 @@ class LlamaIndexService:
             self.index = VectorStoreIndex([], storage_context=storage_context)
             logger.info("Created new vector index")
     
+    def _clear_vector_store(self):
+        """Clear the vector store for force rebuild."""
+        try:
+            logger.info("Clearing vector store for force rebuild")
+            
+            # For ChromaDB, delete and recreate the collection
+            if self.embedding_db.lower() == 'chromadb':
+                collection_name = "edusmartai_main"
+                
+                # Delete existing collection if it exists
+                try:
+                    self.chroma_client.delete_collection(collection_name)
+                    logger.info(f"Deleted existing ChromaDB collection: {collection_name}")
+                except Exception as e:
+                    logger.warning(f"Could not delete collection (may not exist): {e}")
+                
+                # Create new collection
+                self.chroma_collection = self.chroma_client.create_collection(collection_name)
+                logger.info(f"Created new ChromaDB collection: {collection_name}")
+                
+                # Recreate vector store
+                self.vector_store = ChromaVectorStore(chroma_collection=self.chroma_collection)
+                
+                # Update storage context
+                self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
+                
+                # Clear any existing index files
+                import shutil
+                if self.vector_dir.exists():
+                    try:
+                        # Remove all files in storage directory except chroma.sqlite3
+                        for item in self.vector_dir.iterdir():
+                            if item.name != "chroma.sqlite3" and item.name != "__pycache__":
+                                if item.is_file():
+                                    item.unlink()
+                                elif item.is_dir():
+                                    shutil.rmtree(item)
+                        logger.info("Cleared existing index files")
+                    except Exception as e:
+                        logger.warning(f"Could not clear index files: {e}")
+            
+            # Reset index to None - will be recreated
+            self.index = None
+            logger.info("Vector store cleared successfully")
+            
+        except Exception as e:
+            logger.error(f"Error clearing vector store: {e}")
+            raise
+    
     def refresh_index(self, force_rebuild: bool = False) -> Dict[str, Any]:
         """Refresh the vector index with documents from books directory (backwards compatibility)."""
         return self._refresh_index_legacy(force_rebuild)
@@ -184,6 +242,7 @@ class LlamaIndexService:
     def refresh_index_with_citations(self, enhanced_chunks_data: List[Dict], force_rebuild: bool = False) -> Dict[str, Any]:
         """Refresh index with enhanced citation data."""
         try:
+            # Clear existing index if force rebuild
             if force_rebuild:
                 logger.info("Force rebuild requested - clearing existing index")
                 self._clear_vector_store()
@@ -221,10 +280,13 @@ class LlamaIndexService:
             
             # Create index from documents
             if force_rebuild or not self.index:
-                storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
+                # Create fresh storage context if needed
+                if not hasattr(self, 'storage_context') or self.storage_context is None:
+                    self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
+                
                 self.index = VectorStoreIndex.from_documents(
                     documents,
-                    storage_context=storage_context,
+                    storage_context=self.storage_context,
                     show_progress=True
                 )
             else:
