@@ -216,10 +216,16 @@ class ChatManager {
             `;
             
             if (options.citations && options.citations.length > 0) {
+                // Enhanced citation display with book names and pages
+                const citationCount = options.citations.length;
+                const citationPreview = this._formatCitationPreview(options.citations);
+                
                 actionsHTML += `
                     <button class="btn btn-link btn-sm show-citations-btn" 
-                            data-message-id="${options.messageId}" title="Show sources">
-                        <i class="bi bi-book"></i> Sources (${options.citations.length})
+                            data-message-id="${options.messageId}" 
+                            data-citations='${JSON.stringify(options.citations)}'
+                            title="Show sources">
+                        <i class="bi bi-book"></i> ${citationPreview} (${citationCount})
                     </button>
                 `;
             }
@@ -356,22 +362,180 @@ class ChatManager {
 
     showCitations(messageId) {
         // Find citations for this message
-        const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
-        if (!messageElement) return;
+        const citationButton = document.querySelector(`[data-message-id="${messageId}"]`);
+        if (!citationButton) return;
 
-        // This would be populated from the message data
-        // For now, show a placeholder
+        const citationsData = JSON.parse(citationButton.dataset.citations || '[]');
+        
         const citationsModal = new bootstrap.Modal(document.getElementById('citationsModal'));
         const citationsContent = document.getElementById('citationsContent');
         
-        citationsContent.innerHTML = `
-            <div class="alert alert-info">
-                <i class="bi bi-info-circle me-2"></i>
-                Citations functionality will show detailed source information here.
-            </div>
-        `;
+        if (citationsData && citationsData.length > 0) {
+            // Enhanced citations with book names and page numbers
+            let citationsHTML = '<div class="citations-list">';
+            
+            citationsData.forEach((citation, index) => {
+                const isEnhanced = citation.book_name && citation.page_number;
+                
+                if (isEnhanced) {
+                    // Enhanced citation format
+                    citationsHTML += `
+                        <div class="citation-item border rounded p-3 mb-3 bg-light">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div class="citation-info flex-grow-1">
+                                    <h6 class="citation-book mb-1">
+                                        <i class="bi bi-book text-primary me-2"></i>
+                                        <strong>${this._escapeHtml(citation.book_name)}</strong>
+                                    </h6>
+                                    <div class="citation-meta text-muted mb-2">
+                                        <i class="bi bi-file-text me-1"></i>
+                                        Page ${citation.page_number}
+                                        ${citation.relevance_score ? 
+                                            `<span class="badge bg-primary ms-2">${Math.round(citation.relevance_score * 100)}% match</span>` 
+                                            : ''
+                                        }
+                                    </div>
+                                    ${citation.content_preview ? 
+                                        `<div class="citation-preview">
+                                            <small class="text-muted">"${this._escapeHtml(citation.content_preview)}"</small>
+                                        </div>`
+                                        : ''
+                                    }
+                                </div>
+                                <div class="citation-number">
+                                    <span class="badge bg-secondary">${index + 1}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    // Legacy citation format fallback
+                    citationsHTML += `
+                        <div class="citation-item border rounded p-3 mb-3">
+                            <div class="citation-header">
+                                <h6><i class="bi bi-file-text me-2"></i>Source ${index + 1}</h6>
+                                ${citation.score ? 
+                                    `<span class="badge bg-info">Score: ${citation.score.toFixed(3)}</span>` 
+                                    : ''
+                                }
+                            </div>
+                            <div class="citation-text">
+                                <small>${this._escapeHtml(citation.text || 'No preview available')}</small>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+            
+            citationsHTML += '</div>';
+            
+            // Add export button
+            citationsHTML += `
+                <div class="text-center mt-3">
+                    <button class="btn btn-outline-primary btn-sm" onclick="chatManager.exportCitations('${messageId}')">
+                        <i class="bi bi-download me-1"></i>Export Citations
+                    </button>
+                </div>
+            `;
+            
+            citationsContent.innerHTML = citationsHTML;
+        } else {
+            citationsContent.innerHTML = `
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle me-2"></i>
+                    No citation information available for this response.
+                </div>
+            `;
+        }
         
         citationsModal.show();
+    }
+
+    exportCitations(messageId) {
+        /**
+         * Export citations to a text file
+         */
+        const citationButton = document.querySelector(`[data-message-id="${messageId}"]`);
+        if (!citationButton) return;
+
+        const citationsData = JSON.parse(citationButton.dataset.citations || '[]');
+        
+        if (citationsData.length === 0) {
+            app.showToast('No citations to export', 'warning');
+            return;
+        }
+
+        let citationText = 'Sources and Citations\n';
+        citationText += '==================\n\n';
+
+        citationsData.forEach((citation, index) => {
+            citationText += `${index + 1}. `;
+            
+            if (citation.book_name && citation.page_number) {
+                // Enhanced format
+                citationText += `${citation.book_name}, Page ${citation.page_number}\n`;
+                if (citation.content_preview) {
+                    citationText += `   "${citation.content_preview}"\n`;
+                }
+                if (citation.relevance_score) {
+                    citationText += `   Relevance: ${Math.round(citation.relevance_score * 100)}%\n`;
+                }
+            } else {
+                // Legacy format
+                citationText += `Source ${index + 1}\n`;
+                if (citation.text) {
+                    citationText += `   "${citation.text}"\n`;
+                }
+                if (citation.score) {
+                    citationText += `   Score: ${citation.score.toFixed(3)}\n`;
+                }
+            }
+            citationText += '\n';
+        });
+
+        // Create and download file
+        const blob = new Blob([citationText], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `citations_${new Date().toISOString().slice(0, 10)}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        app.showToast('Citations exported successfully', 'success');
+    }
+
+    _escapeHtml(text) {
+        /**
+         * Escape HTML characters to prevent XSS
+         */
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    _formatCitationPreview(citations) {
+        if (!citations || citations.length === 0) return 'Sources';
+        
+        if (citations[0].book_name) {
+            if (citations.length === 1) {
+                const citation = citations[0];
+                return `${citation.book_name} p.${citation.page_number}`;
+            } else {
+                const uniqueBooks = new Set(citations.map(c => c.book_name));
+                if (uniqueBooks.size === 1) {
+                    const bookName = citations[0].book_name;
+                    const pages = citations.map(c => c.page_number).join(', ');
+                    return `${bookName} pp.${pages}`;
+                } else {
+                    return `${uniqueBooks.size} books`;
+                }
+            }
+        } else {
+            return 'Sources';
+        }
     }
 
     async showSessionStats() {

@@ -67,6 +67,12 @@ body {
 
 .message-actions {
     margin-top: 0.5rem;
+    opacity: 0.7;
+    transition: opacity 0.2s ease;
+}
+
+.message-bubble:hover .message-actions {
+    opacity: 1;
 }
 
 .typing-indicator {
@@ -137,6 +143,54 @@ body {
     font-size: 0.75rem;
     color: #6c757d;
     float: right;
+}
+
+/* Citations and Source Display */
+.citations-list {
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.citation-item {
+    transition: all 0.2s ease;
+    border-left: 4px solid var(--primary-color) !important;
+}
+
+.citation-item:hover {
+    transform: translateX(4px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.citation-book {
+    color: var(--primary-color);
+    font-size: 1.1rem;
+}
+
+.citation-meta {
+    font-size: 0.9rem;
+}
+
+.citation-preview {
+    background: rgba(0, 102, 204, 0.05);
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+    margin-top: 0.5rem;
+    border-left: 3px solid rgba(0, 102, 204, 0.3);
+}
+
+.citation-number {
+    min-width: 40px;
+    text-align: center;
+}
+
+.citation-number .badge {
+    font-size: 0.9rem;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 /* Sidebar Styles */
@@ -386,4 +440,69 @@ code {
 
 ::-webkit-scrollbar-thumb:hover {
     background: #a8a8a8;
+}
+
+/* Citation modal enhancements */
+#citationsModal .modal-dialog {
+    max-width: 700px;
+}
+
+#citationsModal .modal-header {
+    background: linear-gradient(135deg, var(--primary-color), #4d8fff);
+    color: white;
+    border-radius: 0.5rem 0.5rem 0 0;
+}
+
+#citationsModal .modal-body {
+    padding: 1.5rem;
+}
+
+/* Citation export button */
+.citation-export-btn {
+    background: linear-gradient(135deg, var(--success-color), #20c997);
+    border: none;
+    color: white;
+    transition: all 0.2s ease;
+}
+
+.citation-export-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(40, 167, 69, 0.3);
+    color: white;
+}
+
+/* Responsive citation display */
+@media (max-width: 768px) {
+    .citation-item {
+        margin-bottom: 1rem;
+    }
+    
+    .citation-book {
+        font-size: 1rem;
+    }
+    
+    .citation-preview {
+        font-size: 0.85rem;
+    }
+    
+    #citationsModal .modal-dialog {
+        margin: 0.5rem;
+        max-width: calc(100% - 1rem);
+    }
+}
+
+/* Animation for new citations */
+@keyframes slideInFromRight {
+    from {
+        transform: translateX(20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.citation-item {
+    animation: slideInFromRight 0.3s ease-out;
 }

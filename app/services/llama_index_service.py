@@ -1,10 +1,11 @@
 """
 LlamaIndex service for RAG functionality.
 Handles vector storage, embedding, and query processing using Gemini.
+Enhanced with citation and source tracking capabilities.
 """
 import os
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 
 # Import chroma config first to disable telemetry
@@ -18,7 +19,8 @@ from llama_index.core import (
     SimpleDirectoryReader, 
     StorageContext,
     Settings,
-    load_index_from_storage
+    load_index_from_storage,
+    Document
 )
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.embeddings.gemini import GeminiEmbedding
@@ -27,6 +29,28 @@ from llama_index.vector_stores.chroma import ChromaVectorStore
 import chromadb
 
 logger = logging.getLogger(__name__)
+
+
+class EnhancedCitationData:
+    """Container for citation information."""
+    
+    def __init__(self, book_name: str, page_number: int, source_id: str, 
+                 content_preview: str = "", relevance_score: float = 0.0):
+        self.book_name = book_name
+        self.page_number = page_number
+        self.source_id = source_id
+        self.content_preview = content_preview
+        self.relevance_score = relevance_score
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for API response."""
+        return {
+            'book_name': self.book_name,
+            'page_number': self.page_number,
+            'source_id': self.source_id,
+            'content_preview': self.content_preview,
+            'relevance_score': round(self.relevance_score, 3)
+        }
 
 
 class LlamaIndexService:
@@ -154,7 +178,81 @@ class LlamaIndexService:
             logger.info("Created new vector index")
     
     def refresh_index(self, force_rebuild: bool = False) -> Dict[str, Any]:
-        """Refresh the vector index with documents from books directory."""
+        """Refresh the vector index with documents from books directory (backwards compatibility)."""
+        return self._refresh_index_legacy(force_rebuild)
+    
+    def refresh_index_with_citations(self, enhanced_chunks_data: List[Dict], force_rebuild: bool = False) -> Dict[str, Any]:
+        """Refresh index with enhanced citation data."""
+        try:
+            if force_rebuild:
+                logger.info("Force rebuild requested - clearing existing index")
+                self._clear_vector_store()
+            
+            if not enhanced_chunks_data:
+                return {"status": "error", "message": "No document data provided"}
+            
+            # Create Documents with enhanced metadata
+            documents = []
+            total_chunks = 0
+            
+            for file_data in enhanced_chunks_data:
+                book_metadata = file_data['metadata']
+                chunks = file_data['chunks']
+                
+                for chunk in chunks:
+                    # Create LlamaIndex Document with enhanced metadata
+                    doc = Document(
+                        text=chunk.content,
+                        metadata={
+                            'book_name': chunk.book_name,
+                            'page_number': chunk.page_number,
+                            'chunk_index': chunk.chunk_index,
+                            'source_id': chunk.metadata['source_id'],
+                            'content_preview': chunk.metadata['content_preview'],
+                            'file_path': book_metadata['file_path'],
+                            'author': book_metadata.get('author', 'Unknown'),
+                            'total_pages': book_metadata.get('total_pages', 0)
+                        }
+                    )
+                    documents.append(doc)
+                    total_chunks += 1
+            
+            logger.info(f"Creating index from {total_chunks} enhanced chunks from {len(enhanced_chunks_data)} books")
+            
+            # Create index from documents
+            if force_rebuild or not self.index:
+                storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
+                self.index = VectorStoreIndex.from_documents(
+                    documents,
+                    storage_context=storage_context,
+                    show_progress=True
+                )
+            else:
+                # Add documents to existing index
+                for doc in documents:
+                    self.index.insert(doc)
+            
+            # Persist the index
+            self.index.storage_context.persist(persist_dir=str(self.vector_dir))
+            
+            logger.info(f"Successfully created enhanced index with {total_chunks} chunks and citation metadata")
+            
+            return {
+                "status": "success",
+                "message": f"Enhanced index created with {total_chunks} chunks from {len(enhanced_chunks_data)} books",
+                "total_chunks": total_chunks,
+                "total_books": len(enhanced_chunks_data)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error refreshing enhanced index: {e}")
+            return {
+                "status": "error",
+                "message": f"Error refreshing enhanced index: {str(e)}"
+            }
+    
+    def _refresh_index_legacy(self, force_rebuild: bool = False) -> Dict[str, Any]:
+        """Legacy index refresh method for backwards compatibility."""
         try:
             if force_rebuild:
                 # Create fresh index
@@ -206,7 +304,7 @@ class LlamaIndexService:
             }
     
     def query(self, question: str, max_tokens: int = 500) -> Dict[str, Any]:
-        """Perform a query against the vector index."""
+        """Perform a query against the vector index with enhanced citation extraction."""
         try:
             if not self.index:
                 return {
@@ -217,7 +315,7 @@ class LlamaIndexService:
             
             # Create query engine with better settings for more detailed responses
             query_engine = self.index.as_query_engine(
-                response_mode="tree_summarize",  # Back to tree_summarize for better responses
+                response_mode="tree_summarize",
                 similarity_top_k=5,
                 verbose=True,
                 streaming=False
@@ -233,23 +331,10 @@ class LlamaIndexService:
             
             # Debug the response object
             logger.info(f"Response object type: {type(response)}")
-            logger.info(f"Response object attributes: {dir(response)}")
             logger.info(f"Raw response: {response}")
             
-            # Extract citations
-            citations = []
-            if hasattr(response, 'source_nodes') and response.source_nodes:
-                logger.info(f"Found {len(response.source_nodes)} source nodes")
-                for i, node in enumerate(response.source_nodes[:5]):  # Increase to 5
-                    try:
-                        citations.append({
-                            "text": node.text[:300] + "..." if len(node.text) > 300 else node.text,
-                            "score": getattr(node, 'score', 0.0),
-                            "metadata": getattr(node, 'metadata', {}),
-                            "source": f"Document {i+1}"
-                        })
-                    except Exception as citation_error:
-                        logger.warning(f"Error processing citation {i}: {citation_error}")
+            # Enhanced citation extraction
+            enhanced_citations = self._extract_enhanced_citations(response)
             
             # Process the response more carefully
             response_text = ""
@@ -265,13 +350,14 @@ class LlamaIndexService:
             
             logger.info(f"Processed response text: '{response_text}'")
             logger.info(f"Response length: {len(response_text)}")
+            logger.info(f"Found {len(enhanced_citations)} enhanced citations")
             
             # Provide a more informative response if it's too short
             if not response_text or len(response_text) < 20:
-                if citations:
+                if enhanced_citations:
                     response_text = f"Based on the documents, here's what I found related to your question about '{question}':\n\n"
-                    for i, citation in enumerate(citations[:2]):
-                        response_text += f"From Document {i+1}: {citation['text']}\n\n"
+                    for i, citation in enumerate(enhanced_citations[:2]):
+                        response_text += f"From {citation['book_name']} (Page {citation['page_number']}): {citation['content_preview']}\n\n"
                     response_text += "Would you like me to elaborate on any specific aspect?"
                 else:
                     response_text = f"I found some information in the documents, but couldn't generate a detailed response for your question: '{question}'. The documents might not contain enough relevant information, or the question might need to be more specific. Please try rephrasing your question or ask about specific topics covered in the uploaded documents."
@@ -279,7 +365,7 @@ class LlamaIndexService:
             logger.info(f"Final response length: {len(response_text)}")
             return {
                 "response": response_text,
-                "citations": citations,
+                "citations": enhanced_citations,
                 "status": "success"
             }
             
@@ -302,6 +388,66 @@ class LlamaIndexService:
                 "citations": [],
                 "status": "error"
             }
+    
+    def _extract_enhanced_citations(self, response) -> List[Dict[str, Any]]:
+        """Extract enhanced citations with book names and page numbers."""
+        citations = []
+        
+        try:
+            if hasattr(response, 'source_nodes') and response.source_nodes:
+                logger.info(f"Found {len(response.source_nodes)} source nodes")
+                
+                for i, node in enumerate(response.source_nodes[:5]):  # Limit to top 5
+                    try:
+                        metadata = getattr(node, 'metadata', {})
+                        
+                        # Extract enhanced citation information
+                        book_name = metadata.get('book_name', f'Document {i+1}')
+                        page_number = metadata.get('page_number', 0)
+                        source_id = metadata.get('source_id', f'source_{i}')
+                        content_preview = metadata.get('content_preview', '')
+                        
+                        # If no content preview in metadata, create from node text
+                        if not content_preview and hasattr(node, 'text'):
+                            content_preview = node.text[:150] + "..." if len(node.text) > 150 else node.text
+                        
+                        # Calculate relevance score from node score
+                        relevance_score = getattr(node, 'score', 0.0)
+                        if relevance_score == 0.0 and hasattr(node, 'similarity'):
+                            relevance_score = getattr(node, 'similarity', 0.0)
+                        
+                        # Create enhanced citation
+                        citation = EnhancedCitationData(
+                            book_name=book_name,
+                            page_number=page_number,
+                            source_id=source_id,
+                            content_preview=content_preview,
+                            relevance_score=relevance_score
+                        )
+                        
+                        citations.append(citation.to_dict())
+                        
+                        logger.info(f"Extracted citation: {book_name}, Page {page_number}")
+                        
+                    except Exception as citation_error:
+                        logger.warning(f"Error processing citation {i}: {citation_error}")
+                        continue
+        
+        except Exception as e:
+            logger.warning(f"Error extracting enhanced citations: {e}")
+        
+        # Remove duplicates based on source_id and sort by relevance
+        unique_citations = []
+        seen_sources = set()
+        
+        for citation in sorted(citations, key=lambda x: x['relevance_score'], reverse=True):
+            source_key = f"{citation['book_name']}_{citation['page_number']}"
+            if source_key not in seen_sources:
+                seen_sources.add(source_key)
+                unique_citations.append(citation)
+        
+        logger.info(f"Returning {len(unique_citations)} unique citations")
+        return unique_citations[:3]  # Return top 3 unique citations
     
     def summarize(self, topic: str = None) -> Dict[str, Any]:
         """Generate a summary of the indexed content."""
