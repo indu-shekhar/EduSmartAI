@@ -55,7 +55,7 @@ class LlamaIndexService:
         
         # Configure global settings with better parameters
         Settings.llm = Gemini(
-            model_name="models/gemini-1.5-flash",
+            model_name="models/gemini-2.5-flash",
             api_key=self.gemini_api_key,
             temperature=0.7,  # Increased for more creative responses
             max_tokens=1024   # Increased token limit
