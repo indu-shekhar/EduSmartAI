@@ -16,7 +16,7 @@ llama-index-readers-file==0.1.*
 llama-index-vector-stores-chroma==0.1.*
 
 # Vector database
-chromadb>=0.4.15
+chromadb>=0.4.15,<0.6.0
 
 # PDF processing
 PyPDF2==3.*
@@ -24,10 +24,10 @@ pdfplumber==0.10.*
 pdfminer.six
 
 # File type detection for Windows
-python-magic-bin==0.4.*
+python-magic
 
 # Windows-specific utilities
-pywin32==306
+#pywin32==306
 
 # Database
 SQLAlchemy==2.*

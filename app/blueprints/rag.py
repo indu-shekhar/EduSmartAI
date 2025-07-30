@@ -32,7 +32,22 @@ def query():
         if not question:
             return jsonify({'error': 'Question cannot be empty'}), 400
         
-        max_tokens = data.get('max_tokens', 500)
+        # Dynamic max_tokens based on question complexity and user preference
+        default_max_tokens = 2000
+        user_max_tokens = data.get('max_tokens', default_max_tokens)
+        
+        # Auto-increase tokens for detailed questions
+        question_lower = question.lower()
+        requires_detailed_response = any(keyword in question_lower for keyword in [
+            'explain', 'describe', 'elaborate', 'detail', 'comprehensive', 'compare', 
+            'contrast', 'analyze', 'summarize', 'overview', 'how', 'why', 'what are',
+            'list', 'steps', 'process', 'method', 'approach', 'differences', 'similarities'
+        ])
+        
+        if requires_detailed_response:
+            max_tokens = max(user_max_tokens, 3000)  # Ensure minimum for detailed responses
+        else:
+            max_tokens = user_max_tokens
         
         start_time = time.time()
         result = llama_service.query(question, max_tokens=max_tokens)

@@ -76,6 +76,25 @@ def send_message():
         # Determine response type based on message content
         response_type = _determine_response_type(user_message)
         
+        # Dynamic max_tokens based on message complexity and type
+        user_max_tokens = data.get('max_tokens', 2000)
+        
+        # Auto-increase tokens for detailed questions or specific response types
+        message_lower = user_message.lower()
+        requires_detailed_response = (
+            response_type in ['summary', 'compare'] or
+            any(keyword in message_lower for keyword in [
+                'explain', 'describe', 'elaborate', 'detail', 'comprehensive', 'compare', 
+                'contrast', 'analyze', 'summarize', 'overview', 'how', 'why', 'what are',
+                'list', 'steps', 'process', 'method', 'approach', 'differences', 'similarities'
+            ])
+        )
+        
+        if requires_detailed_response:
+            max_tokens = max(user_max_tokens, 3000)  # Ensure minimum for detailed responses
+        else:
+            max_tokens = user_max_tokens
+        
         # Process message based on type
         start_time = time.time()
         
@@ -89,10 +108,10 @@ def send_message():
             if len(concepts) >= 2:
                 result = llama_service.compare(concepts[0], concepts[1])
             else:
-                result = llama_service.query(user_message)
+                result = llama_service.query(user_message, max_tokens=max_tokens)
         else:
-            # Default query
-            result = llama_service.query(user_message)
+            # Default query with dynamic token sizing
+            result = llama_service.query(user_message, max_tokens=max_tokens)
         
         processing_time = time.time() - start_time
         

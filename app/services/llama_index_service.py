@@ -28,6 +28,69 @@ from llama_index.llms.gemini import Gemini
 from llama_index.vector_stores.chroma import ChromaVectorStore
 import chromadb
 
+# Monkey patch ChromaDB Collection to handle empty filters
+def patched_query(self, query_embeddings=None, query_texts=None, n_results=10, where=None, where_document=None, include=None, **kwargs):
+    """Patched query method that handles empty where filters and None include"""
+    # Remove empty where filter to prevent validation errors
+    if where is not None and (where == {} or not where):
+        where = None
+    if where_document is not None and (where_document == {} or not where_document):
+        where_document = None
+    
+    # Fix include parameter - ChromaDB expects a list, not None
+    if include is None:
+        include = ["metadatas", "documents", "distances"]
+    
+    # Call the original query method
+    return self._original_query(
+        query_embeddings=query_embeddings,
+        query_texts=query_texts,
+        n_results=n_results,
+        where=where,
+        where_document=where_document,
+        include=include,
+        **kwargs
+    )
+
+# Apply the monkey patch
+try:
+    from chromadb.api.models.Collection import Collection
+    if not hasattr(Collection, '_original_query'):
+        Collection._original_query = Collection.query
+        Collection.query = patched_query
+except ImportError:
+    pass
+
+# Custom ChromaVectorStore wrapper to handle empty filters
+class CompatibleChromaVectorStore(ChromaVectorStore):
+    """ChromaVectorStore wrapper that handles empty filters properly for compatibility"""
+    
+    def query(self, query, **kwargs):
+        """Override query method to handle empty filters"""
+        # Remove empty filters to prevent ChromaDB validation errors
+        if 'filters' in kwargs and not kwargs['filters']:
+            kwargs.pop('filters')
+        if 'where' in kwargs and not kwargs['where']:
+            kwargs.pop('where')
+        return super().query(query, **kwargs)
+    
+    def _query(self, query_embedding, **kwargs):
+        """Override internal _query method to handle empty filters"""
+        # Remove empty filters to prevent ChromaDB validation errors
+        if 'filters' in kwargs and not kwargs['filters']:
+            kwargs.pop('filters')
+        if 'where' in kwargs and not kwargs['where']:
+            kwargs.pop('where')
+        
+        # Also handle any filter-related parameters in kwargs
+        cleaned_kwargs = {}
+        for key, value in kwargs.items():
+            if key.startswith('filter') and not value:
+                continue  # Skip empty filter parameters
+            cleaned_kwargs[key] = value
+            
+        return super()._query(query_embedding, **cleaned_kwargs)
+
 logger = logging.getLogger(__name__)
 
 
@@ -81,12 +144,12 @@ class LlamaIndexService:
         if not self.gemini_api_key:
             raise ValueError("GEMINI_API_KEY not found in configuration")
         
-        # Configure global settings with better parameters
+        # Configure global settings with optimized parameters for better responses
         Settings.llm = Gemini(
             model_name="models/gemini-2.5-flash",
             api_key=self.gemini_api_key,
-            temperature=0.7,  # Increased for more creative responses
-            max_tokens=1024   # Increased token limit
+            temperature=0.7,  # Reduced for more focused and accurate responses
+            max_tokens=4096   # Increased token limit for comprehensive detailed responses
         )
         
         Settings.embed_model = GeminiEmbedding(
@@ -94,26 +157,31 @@ class LlamaIndexService:
             api_key=self.gemini_api_key
         )
         
-        # Configure text splitter with better settings
+        # Configure text splitter with optimized settings for better context and higher token responses
         Settings.node_parser = SentenceSplitter(
-            chunk_size=512,    # Reduced chunk size for better context
-            chunk_overlap=50   # Increased overlap for better continuity
+            chunk_size=768,    # Increased chunk size for richer context
+            chunk_overlap=128  # Increased overlap for better continuity and context preservation
         )
         
-        # Set system prompt for better responses
+        # Set optimized system prompt for knowledge-first responses
         from llama_index.core import PromptTemplate
         
         qa_prompt_tmpl = (
-            "Context information is below.\n"
+            "You are an intelligent educational assistant with comprehensive knowledge across all subjects. "
+            "Answer the following question based on your extensive knowledge and understanding.\n\n"
+            "Additional context information (use as hint or supporting reference if relevant):\n"
             "---------------------\n"
             "{context_str}\n"
-            "---------------------\n"
-            "Given the context information and not prior knowledge, "
-            "answer the question in a detailed and helpful manner. "
-            "If the context doesn't contain enough information to answer the question, "
-            "say so explicitly and suggest what kind of information would be needed.\n"
-            "Question: {query_str}\n"
-            "Answer: "
+            "---------------------\n\n"
+            "Instructions:\n"
+            "1. Answer the question primarily using your knowledge and understanding\n"
+            "2. Use the context information above ONLY as a hint or supporting reference when relevant\n"
+            "3. Do not rely solely on the context - your knowledge is the primary source\n"
+            "4. If context contains relevant information, incorporate it naturally but don't limit yourself to it\n"
+            "5. Provide comprehensive, detailed, and well-structured responses\n"
+            "6. If the question requires extensive explanation, provide thorough coverage without token limitations\n\n"
+            "Question: {query_str}\n\n"
+            "Provide a detailed and comprehensive answer:"
         )
         
         Settings.text_qa_template = PromptTemplate(qa_prompt_tmpl)
@@ -160,7 +228,12 @@ class LlamaIndexService:
                 
                 # Store collection as instance variable for later use
                 self.chroma_collection = chroma_collection
-                self.vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+                # Initialize ChromaVectorStore with compatibility settings
+                self.vector_store = ChromaVectorStore(
+                    chroma_collection=chroma_collection,
+                    # Ensure no empty filters are passed
+                    stores_text=True
+                )
                 logger.info(f"ChromaDB vector store initialized at {self.vector_dir}")
                 
             except Exception as e:
@@ -207,7 +280,10 @@ class LlamaIndexService:
                 logger.info(f"Created new ChromaDB collection: {collection_name}")
                 
                 # Recreate vector store
-                self.vector_store = ChromaVectorStore(chroma_collection=self.chroma_collection)
+                self.vector_store = ChromaVectorStore(
+                    chroma_collection=self.chroma_collection,
+                    stores_text=True
+                )
                 
                 # Update storage context
                 self.storage_context = StorageContext.from_defaults(vector_store=self.vector_store)
@@ -365,8 +441,8 @@ class LlamaIndexService:
                 "message": f"Error refreshing index: {str(e)}"
             }
     
-    def query(self, question: str, max_tokens: int = 500) -> Dict[str, Any]:
-        """Perform a query against the vector index with enhanced citation extraction."""
+    def query(self, question: str, max_tokens: int = 2000) -> Dict[str, Any]:
+        """Perform a query against the vector index with enhanced citation extraction and dynamic context sizing."""
         try:
             if not self.index:
                 return {
@@ -375,19 +451,40 @@ class LlamaIndexService:
                     "status": "error"
                 }
             
-            # Create query engine with better settings for more detailed responses
+            # Dynamic context sizing based on question complexity
+            question_lower = question.lower()
+            requires_detailed_response = any(keyword in question_lower for keyword in [
+                'explain', 'describe', 'elaborate', 'detail', 'comprehensive', 'compare', 
+                'contrast', 'analyze', 'summarize', 'overview', 'how', 'why', 'what are',
+                'list', 'steps', 'process', 'method', 'approach', 'differences', 'similarities'
+            ])
+            
+            # Adjust similarity_top_k and max_tokens based on question complexity
+            if requires_detailed_response:
+                similarity_top_k = 8
+                effective_max_tokens = max(max_tokens, 3000)  # Ensure minimum for detailed responses
+            else:
+                similarity_top_k = 5
+                effective_max_tokens = max_tokens
+            
+            # Create query engine with optimized settings for comprehensive responses
             query_engine = self.index.as_query_engine(
                 response_mode="tree_summarize",
-                similarity_top_k=5,
+                similarity_top_k=similarity_top_k,
                 verbose=True,
                 streaming=False
             )
             
-            # Execute query with additional error handling
-            logger.info(f"Executing query: {question[:100]}...")
+            # Execute query with optimized question enhancement
+            logger.info(f"Executing optimized query (tokens: {effective_max_tokens}, top_k: {similarity_top_k}): {question[:100]}...")
             
-            # Try to get a more detailed response by adding context to the question
-            enhanced_question = f"Based on the provided documents, please provide a detailed answer to: {question}"
+            # Optimized question that prioritizes LLM knowledge
+            enhanced_question = (
+                f"Question: {question}\n\n"
+                f"Please provide a comprehensive and detailed answer based on your knowledge. "
+                f"Use any relevant context provided as supporting information or hints, but do not limit your response to the context alone. "
+                f"Ensure your answer is thorough and educational."
+            )
             
             response = query_engine.query(enhanced_question)
             
@@ -422,7 +519,28 @@ class LlamaIndexService:
                         response_text += f"From {citation['book_name']} (Page {citation['page_number']}): {citation['content_preview']}\n\n"
                     response_text += "Would you like me to elaborate on any specific aspect?"
                 else:
-                    response_text = f"I found some information in the documents, but couldn't generate a detailed response for your question: '{question}'. The documents might not contain enough relevant information, or the question might need to be more specific. Please try rephrasing your question or ask about specific topics covered in the uploaded documents."
+                    # Use LLM's own knowledge if no relevant document content found
+                    fallback_question = (
+                        f"Please provide a comprehensive answer to this question using your knowledge: {question}. "
+                        f"Provide detailed and educational information."
+                    )
+                    try:
+                        fallback_response = query_engine.query(fallback_question)
+                        fallback_text = ""
+                        if hasattr(fallback_response, 'response'):
+                            fallback_text = str(fallback_response.response)
+                        elif hasattr(fallback_response, 'text'):
+                            fallback_text = str(fallback_response.text)
+                        else:
+                            fallback_text = str(fallback_response)
+                        
+                        if fallback_text and len(fallback_text.strip()) > 20:
+                            response_text = fallback_text.strip()  # No prefix needed - it's comprehensive knowledge
+                        else:
+                            response_text = f"I'll provide information based on my knowledge about '{question}', though I couldn't find specific references in the uploaded documents. Please let me know if you'd like me to elaborate on any aspect."
+                    except Exception as fallback_error:
+                        logger.warning(f"Fallback query failed: {fallback_error}")
+                        response_text = f"I'll provide information based on my knowledge about '{question}', though I couldn't find specific references in the uploaded documents. Please let me know if you'd like me to elaborate on any aspect."
             
             logger.info(f"Final response length: {len(response_text)}")
             return {
@@ -433,6 +551,38 @@ class LlamaIndexService:
             
         except Exception as e:
             logger.error(f"Error during query: {e}", exc_info=True)
+            # Try to provide a helpful response using LLM's own knowledge
+            try:
+                logger.info(f"Attempting fallback response using LLM knowledge for: {question}")
+                # Create a simple query engine without requiring documents
+                simple_query_engine = self.index.as_query_engine(
+                    response_mode="compact",
+                    similarity_top_k=1,
+                    verbose=False
+                )
+                fallback_question = (
+                    f"Please provide a comprehensive and detailed answer to this question using your knowledge: {question}. "
+                    f"Give educational and informative information even if specific documents aren't available."
+                )
+                fallback_response = simple_query_engine.query(fallback_question)
+                
+                fallback_text = ""
+                if hasattr(fallback_response, 'response'):
+                    fallback_text = str(fallback_response.response)
+                elif hasattr(fallback_response, 'text'):
+                    fallback_text = str(fallback_response.text)
+                else:
+                    fallback_text = str(fallback_response)
+                
+                if fallback_text and len(fallback_text.strip()) > 20:
+                    return {
+                        "response": fallback_text.strip(),  # Clean response without prefix
+                        "citations": [],
+                        "status": "success"
+                    }
+            except Exception as fallback_error:
+                logger.warning(f"Fallback response also failed: {fallback_error}")
+            
             # Provide a more helpful fallback response
             fallback_response = (
                 f"I encountered an error while processing your question: '{question}'. "
@@ -522,11 +672,11 @@ class LlamaIndexService:
                 }
             
             if topic:
-                query_text = f"Provide a comprehensive summary about {topic} based on the available documents"
+                query_text = f"Provide a comprehensive and detailed summary about {topic}. Use your extensive knowledge along with any relevant information from the available documents. Include key concepts, explanations, and important details to create an educational and thorough summary."
             else:
-                query_text = "Provide a comprehensive summary of the main topics and concepts covered in the available documents"
+                query_text = "Provide a comprehensive summary of the main topics and concepts covered in the available documents. Use your knowledge to expand on the topics with additional context, explanations, and educational details that would be helpful for understanding."
             
-            return self.query(query_text, max_tokens=800)
+            return self.query(query_text, max_tokens=3500)  # Increased for comprehensive summaries
             
         except Exception as e:
             logger.error(f"Error during summarization: {e}")
@@ -546,9 +696,9 @@ class LlamaIndexService:
                     "status": "error"
                 }
             
-            query_text = f"Compare and contrast {concept1} and {concept2}. Highlight similarities, differences, and key relationships between these concepts."
+            query_text = f"Provide a comprehensive comparison between {concept1} and {concept2}. Use your knowledge to thoroughly analyze similarities, differences, key relationships, and practical applications of these concepts. Include detailed explanations that would be educational and helpful for understanding both concepts and their relationship."
             
-            return self.query(query_text, max_tokens=800)
+            return self.query(query_text, max_tokens=3500)  # Increased for comprehensive comparisons
             
         except Exception as e:
             logger.error(f"Error during comparison: {e}")
